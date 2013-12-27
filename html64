@@ -1,0 +1,200 @@
+#!/bin/bash
+
+# Convert <img src="$url"/> into <img src="data:..."/>.
+
+usage()
+{
+	[ -n "$2" ] && \
+	echo "ERROR: $2" >&2 && echo
+	echo "Usage: $(basename ${BASH_SOURCE[0]}) [-h|--help] [-o|--output] [input] "
+	echo
+	echo "  -h,--help     : Print this help."
+	echo "  -o,--output   : Output file. Write to stdout if blank."
+	echo "  -V,--verbose  : Show progress."
+	echo "  input         : Input file. Read from stdin if blank."
+	echo
+	exit "$1"
+}
+
+# check external program
+STARLET="$(which xml 2>/dev/null)"
+[ $? -ne 0 ] && STARLET="$(which xmlstarlet 2>/dev/null)"
+[ $? -ne 0 ] && usage 1 "Cannot find XMLStarlet."
+FILEBIN="$(which file 2>/dev/null)" || \
+	usage 1 "Cannot find \`file'."
+B64BIN="$(which base64 2>/dev/null)" || \
+	usage 1 "Cannot find \`base64'."
+
+# globals
+OUTFL=
+XMLFL=
+VERBOSE=0
+
+while [ "$1" ]; do
+	case "$1" in
+		-h|--help)
+			usage 0
+			;;
+		-V|--verbose)
+			VERBOSE=1
+			shift ;;
+		-o|--output)
+			shift
+			[ -z "$1" ] && \
+				usage 1 "Blank output file provided."
+			OUTFL="$1"
+			touch "$OUTFL" &>/dev/null
+			[ $? -ne 0 ] && \
+				usage 1 "Cannot write to output file."
+			shift ;;
+		*)
+			if [ -n "$1" ]; then
+				[ ! -f "$1" ] && \
+					usage 1 "Invalid input file."
+				XMLFL="$1"
+				break
+			fi
+			break ;;
+	esac
+done
+
+conv_html_ent()
+{
+# Make HTML more friendly to XMLStarlet. This following sed only does the
+# trick for reST-generated HTML.
+	if [ -n "$XMLFL" ]; then
+		sed 's/\&nbsp;/\&#160;/g' "$XMLFL"
+	else
+		sed 's/\&nbsp;/\&#160;/g' < /dev/stdin
+	fi
+}
+XML="$(conv_html_ent)"
+
+data_get_mime()
+{
+	MIME="$("$FILEBIN" --brief --mime "$1" | cut -d";" -f1)"
+	[[ ! "$MIME" =~ ^image/ ]] && return 1
+	echo "$MIME"
+	return 0
+}
+
+data_local()
+{
+	MIME="$(data_get_mime "$1")"
+	[ $? -ne 0 ] && return
+	echo -n "data:${MIME};base64,"
+	"$B64BIN" "$1" | tr -d '\n'
+}
+
+data_remote()
+{
+	# TODO
+	echo -ne
+}
+
+# We'll use concat(@src,'\n') which is only converted to real new lines with
+# echo -e. Hence we cannot stick SRC_PTH into SRC_ABS.
+SRC_PTH="$(echo "$XML" | \
+		"$STARLET" sel -T -t -m "//*[local-name()='img'][@src]" \
+		-v "concat(@src,'\n')" 2>/dev/null
+	)"
+# This is the first and only HTML validation.
+[ $? -ne 0 ] && usage 1 "Invalid HTML."
+
+# Read data for each found attribute or nullify it in case of broken links
+SRC_ABS="$(
+		echo -e "$SRC_PTH" | \
+		while read LN; do 
+			[ -z "$LN" ] && echo "|" && continue
+			ABS=
+			DAT=
+			if [[ "$LN" =~ ^https?:// ]]; then
+				DAT="$(data_remote "$LN")"
+			elif [[ "$LN" =~ ^file:// ]]; then
+				AL=${#LN}
+				ABS="$(readlink -f "${ABS:7:$AL}")"
+			else
+				ABS="$(readlink -f "$LN")"
+			fi
+			if [ -n "$ABS" -a -f "$ABS" ]; then
+				DAT="$(data_local "$ABS")"
+			fi
+			[ -z "$DAT" ] && echo "|" && continue
+			echo "${LN}|${DAT}";
+		done
+	)"
+
+
+# Keep attributes in indexed arrays.
+declare -a SRC_ARR
+let n=0
+for i in $SRC_ABS; do
+	SRC_ARR[$n]=$i
+	let n+=1
+done	
+SRC_ARR_MAX=${#SRC_ARR[@]}
+
+conv_round()
+# recursively edit each found attribute
+{
+	# remainder
+	local let REM="$1"
+	# XPath index starts with 1
+	local let REM1=$((REM + 1))
+	# current processed XML
+	local XMT="$2"
+
+	if [ "$REM" = "$SRC_ARR_MAX" ]; then
+		# we've reach the end
+		echo "$XMT"
+		return
+	fi
+
+	# the old and new
+	local ORI="$(echo "${SRC_ARR[$REM]}" | cut -d'|' -f1)"
+	local NEO="$(echo "${SRC_ARR[$REM]}" | cut -d'|' -f2)"
+
+	if [ -z "$ORI" -o -z "$NEO" ]; then
+		# skip blanks
+		let REM+=1
+		conv_round "$REM" "$XMT"
+		return
+	fi
+
+	if [ $VERBOSE = 1 ]; then
+		echo "$REM1/$SRC_ARR_MAX => $ORI" >&2
+	fi
+
+	# check current node based on REM1
+	local XRC="$(echo "$XML" | "$STARLET" sel -T -t \
+		-m "(//*[local-name()='img'])[$REM1]" -v "@src" )"
+
+	if [ "$XRC" = "$ORI" ]; then
+		# edit only when attribute index and value positively match
+		TXMT="$(echo "$XMT" | "$STARLET" ed -P -S \
+			-u "(//*[local-name()='img']/@src)[$REM1]" -v "$NEO" 2>/dev/null)"
+		# don't renew XML if transformation fails for some reason
+		[ -n "$TXMT" ] && XMT="$TXMT"
+	else
+		# some mistmatch, skip it
+		let REM+=1
+		conv_round "$REM" "$XMT"
+		return
+	fi
+
+	# increase remainder
+	let REM+=1
+
+	# recurse
+	conv_round $REM "$XMT" 
+}
+
+
+if [ -n "$OUTFL" ]; then
+	conv_round 0 "$XML" > "$OUTFL"
+else
+	conv_round 0 "$XML"
+fi
+
+exit 0
+
