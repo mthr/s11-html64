@@ -14,8 +14,8 @@ My use case:
 Dependencies
 ------------
 
-* `sed`, `awk`, `file`, et. al.
-* `base64`
+* `sed`, `base64`, et. al.
+* `file` 
 * `xmlstarlet` (some distros call the executable `xml`) 
 
 

@@ -16,19 +16,14 @@ usage()
 	exit "$1"
 }
 
-prnerr()
-{
-	echo "$@" >&2
-}
-
 # check external program
-STARLET="$(which xml 2>/dev/null)"
-[ $? -ne 0 ] && STARLET="$(which xmlstarlet 2>/dev/null)"
-[ $? -ne 0 ] && usage 1 "Cannot find XMLStarlet."
-FILEBIN="$(which file 2>/dev/null)" || \
-	usage 1 "Cannot find \`file'."
+STARLET="$(which xml 2>/dev/null)" || \
+STARLET="$(which xmlstarlet 2>/dev/null)" || \
+	usage 1 "Cannot find XMLStarlet."
 B64BIN="$(which base64 2>/dev/null)" || \
 	usage 1 "Cannot find \`base64'."
+FILEBIN="$(which file 2>/dev/null)" || \
+	usage 1 "Cannot find \`file'."
 
 # globals
 OUTFL=
@@ -141,7 +136,7 @@ SRC_ARR_MAX=${#SRC_ARR[@]}
 
 # File for storing all errors.
 ERROR_LOG_FILE=/tmp/html64-error.log
-echo -ne > $ERROR_LOG_FILE
+echo -n > $ERROR_LOG_FILE
 
 conv_round()
 # recursively edit each found attribute
