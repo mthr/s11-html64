@@ -16,6 +16,11 @@ usage()
 	exit "$1"
 }
 
+prnerr()
+{
+	echo "$@" >&2
+}
+
 # check external program
 STARLET="$(which xml 2>/dev/null)"
 [ $? -ne 0 ] && STARLET="$(which xmlstarlet 2>/dev/null)"
@@ -134,6 +139,10 @@ for i in $SRC_ABS; do
 done	
 SRC_ARR_MAX=${#SRC_ARR[@]}
 
+# File for storing all errors.
+ERROR_LOG_FILE=/tmp/html64-error.log
+echo -ne > $ERROR_LOG_FILE
+
 conv_round()
 # recursively edit each found attribute
 {
@@ -172,9 +181,12 @@ conv_round()
 	if [ "$XRC" = "$ORI" ]; then
 		# edit only when attribute index and value positively match
 		TXMT="$(echo "$XMT" | "$STARLET" ed -P -S \
-			-u "(//*[local-name()='img']/@src)[$REM1]" -v "$NEO" 2>/dev/null)"
-		# don't renew XML if transformation fails for some reason
-		[ -n "$TXMT" ] && XMT="$TXMT"
+			-u "(//*[local-name()='img']/@src)[$REM1]" -v "$NEO" 2>>$ERROR_LOG_FILE)"
+		if [ -n "$TXMT" ]; then
+			XMT="$TXMT"
+		else
+			[ -f $ERROR_LOG_FILE ] && tail -n1 $ERROR_LOG_FILE >&2
+		fi
 	else
 		# some mistmatch, skip it
 		let REM+=1
