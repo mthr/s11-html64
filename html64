@@ -17,12 +17,12 @@ usage()
 }
 
 # check external program
-STARLET="$(which xml 2>/dev/null)" || \
-STARLET="$(which xmlstarlet 2>/dev/null)" || \
+STARLET="$(type -p xml 2>/dev/null)" || \
+STARLET="$(type -p xmlstarlet 2>/dev/null)" || \
 	usage 1 "Cannot find XMLStarlet."
-B64BIN="$(which base64 2>/dev/null)" || \
+B64BIN="$(type -p base64 2>/dev/null)" || \
 	usage 1 "Cannot find \`base64'."
-FILEBIN="$(which file 2>/dev/null)" || \
+FILEBIN="$(type -p file 2>/dev/null)" || \
 	usage 1 "Cannot find \`file'."
 
 # globals
